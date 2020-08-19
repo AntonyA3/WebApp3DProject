@@ -1,0 +1,757 @@
+<!DOCTYPE html>
+<html>
+    <body> 
+        <h1>
+            Block Editor
+        </h1>
+        <p>
+            <canvas id="my_canvas" width="400" height="300" style="border:1px solid"></canvas>
+        </p>
+        <div>
+            <input type="radio" id="move" name="mode" id="lol" checked="checked" onchange="camera_rotate_mode()">
+            <label for="lol">Camera Movement</label> </br>
+            <input type="radio" id="move" name="mode" id="foo" onchange="block_place_mode()">
+            <label for="foo">Block Editor</label> </br>
+            <input type="radio" id="move" name="mode" id="kd" onchange="block_delete_mode()">
+            <label for="kd">Block Remove</label> </br>
+            <input type="radio" id="move" name="mode" id="nd" onchange="block_recolor_mode()">
+            <label for="nd">Block Recolor</label> </br>
+            <input type="radio" id="move" name="mode" id="eydrop" onchange="eye_dropper_mode()">
+            <label for="eydrop">Eye Dropper</label> </br>
+            <button type="button" onclick="save_button_pressed()"> Save to Obj</button>
+            
+
+        </div>
+        <div>
+            <h2>Color</h2>
+            <input type="color" id="color_picker">
+        </div>
+        <script src="js/gl-matrix-min.js"></script>
+        <script>
+            const mat4 = glMatrix.mat4;
+            const vec3 = glMatrix.vec3;
+            const vec2 = glMatrix.vec2;
+            const quat = glMatrix.quat;
+            const mat3 = glMatrix.mat3;
+
+            
+            
+            class Rectangle{
+                constructor(position, size, normal,alighnment){
+                    this.position = position;
+                    this.size = size;
+                    this.normal = normal;
+                    this.alighnment = alighnment;
+                    this.contains = function(pos){
+                        var min_x = this.position[0];
+                        var max_x = min_x + this.size[0];
+                        var min_y = this.position[1];
+                        var max_y = min_y + this.size[1];
+                        var min_z = this.position[2];
+                        var max_z = min_z + this.size[2];
+
+                 
+                        return pos[0] >= min_x && pos[0] <= max_x &&
+                            pos[1] >= min_y && pos[1] <= max_y &&
+                            pos[2] >= min_z && pos[2] <= max_z;
+                        
+                    }
+                    this.bottom_left = function(){
+                        return this.position;
+                    }
+                    this.top_left = function(){
+                        var x = [];
+                        switch(alighnment){
+                            case 0:
+                                vec3.add(x, this.position, vec3.fromValues(0,this.size[1], 0))
+                                break;
+                            case 1:
+                                vec3.add(x, this.position, vec3.fromValues(0,0, this.size[2]))
+                                break;
+                            case 2:
+                                vec3.add(x, this.position, vec3.fromValues(0, this.size[1], 0))
+                                break;
+                        }
+                        return x;
+                    }
+
+                    this.top_right = function(){
+                        var x = [];
+                        switch(alighnment){
+                            case 0:
+                                vec3.add(x, this.position, vec3.fromValues(0, this.size[1], this.size[2]))
+                                break;
+                            case 1:
+                                vec3.add(x, this.position, vec3.fromValues(this.size[0], 0, this.size[2]))
+                                break;
+                            case 2:
+                                vec3.add(x, this.position, vec3.fromValues(this.size[0], this.size[1], 0))
+                                break;
+                        }
+                        return x;
+                    }
+
+                    this.bottom_right = function(){
+                        var x = [];
+                        switch(alighnment){
+                            case 0: //x 
+                                vec3.add(x, this.position, vec3.fromValues(0, 0, this.size[2]))
+                                break;
+                            case 1: // y
+                                vec3.add(x, this.position, vec3.fromValues(this.size[0], 0, 0))
+                                break;
+                            case 2: //z 
+                                vec3.add(x, this.position, vec3.fromValues(this.size[0], 0, 0))
+                                break;
+                        }
+                        return x;
+                    }
+
+                }
+            }
+
+            class AABB{
+                constructor(position, size){
+                    this.position = position;
+                    this.size = size;
+                    this.faces = [
+                        new Rectangle(vec3.fromValues(position[0],position[1],position[2]), vec3.fromValues(size[0],size[1],0), vec3.fromValues(0,0,-1),2), //front
+                        new Rectangle(vec3.fromValues(position[0],position[1],position[2] + size[2]), vec3.fromValues(size[0],size[1],0), vec3.fromValues(0,0,1),2), //back
+                        new Rectangle(vec3.fromValues(position[0],position[1],position[2]), vec3.fromValues(0,size[1],size[2]), vec3.fromValues(-1,0,0),0), //left
+                        new Rectangle(vec3.fromValues(position[0] + size[0],position[1],position[2]), vec3.fromValues(0,size[1],size[2]), vec3.fromValues(1,0,0),0), //right
+                        new Rectangle(vec3.fromValues(position[0],position[1],position[2]), vec3.fromValues(size[0],0,size[2]), vec3.fromValues(0,-1,0),1), //bottom
+                        new Rectangle(vec3.fromValues(position[0],position[1]+size[1],position[2]), vec3.fromValues(size[0],0,size[2]), vec3.fromValues(0,1,0),1) //top
+                    ];
+
+
+                
+                }
+            }
+            
+        //#region Cube
+            class Cube{
+                static vertex = [
+                    //front
+                    0.0, 0.0, 0.0,
+                    0.0, 1.0, 0.0,
+                    1.0, 1.0, 0.0,
+                    1.0, 0.0, 0.0,
+
+                    //back
+                    1.0, 0.0, 1.0,
+                    1.0, 1.0, 1.0,
+                    0.0, 1.0, 1.0,
+                    0.0, 0.0, 1.0,
+                    //left
+                    0.0,0.0,1.0,
+                    0.0,1.0,1.0,
+                    0.0,1.0,0.0,
+                    0.0,0.0,0.0,
+                    //right
+                    1.0,0.0,0.0,
+                    1.0,1.0,0.0,
+                    1.0,1.0,1.0,
+                    1.0,0.0,1.0,
+
+                    //top
+                    1.0,1.0,0.0,
+                    0.0,1.0,0.0,
+                    0.0,1.0,1.0,
+                    1.0,1.0,1.0,
+
+                    //bottom
+                    1.0,0.0,0.0,
+                    1.0,0.0,1.0,
+                    0.0,0.0,1.0,
+                    0.0,0.0,0.0
+
+                ];
+
+                static index = [
+                    0,1,2, 0,2,3,
+                    4,5,6, 4,6,7,
+                    8,9,10, 8,10,11,
+                    12,13,14, 12,14,15,
+                    16,17,18, 16,18,19,
+                    20,21,22, 20,22,23
+      
+                ];
+
+                static colors = [
+                    0.3, 0.5, 0.3,
+                    0.5, 0.2, 0.8,
+                    0.4, 0.3, 0.4,
+                    1.0, 1.0, 1.0,
+
+                    0.3, 0.5, 0.3,
+                    0.5, 0.2, 0.8,
+                    0.4, 0.3, 0.4,
+                    1.0, 1.0, 1.0,
+
+                    0.3, 0.5, 0.3,
+                    0.5, 0.2, 0.8,
+                    0.4, 0.3, 0.4,
+                    1.0, 1.0, 1.0,
+
+                    0.3, 0.5, 0.3,
+                    0.5, 0.2, 0.8,
+                    0.4, 0.3, 0.4,
+                    1.0, 1.0, 1.0,
+
+                    0.3, 0.5, 0.3,
+                    0.5, 0.2, 0.8,
+                    0.4, 0.3, 0.4,
+                    1.0, 1.0, 1.0,
+
+                    0.3, 0.5, 0.3,
+                    0.5, 0.2, 0.8,
+                    0.4, 0.3, 0.4,
+                    1.0, 1.0, 1.0
+                ];
+
+                constructor(position, color){
+                    this.position = position;
+                    this.color = color
+                    this.get_aabb = function(){
+         
+                        return new AABB(this.position, vec3.fromValues(1,1,1));
+                    }
+                   
+                }
+            }
+
+            const Movement = {"none":0,"forward":1, "backward":2, "left":3,"right":4}
+            Object.freeze(Movement);
+            //#endregion
+
+//#region Camera            
+            class Camera{
+                constructor(){
+                    this.position = vec3.create();
+                    vec3.set(this.position,0,0,-10);
+
+                    this.up = vec3.create();
+                    vec3.set(this.up,0,1,0);
+
+                    this.target = vec3.create();
+                    this.base_target = vec3.create();
+                    vec3.set(this.target,0,0,0);
+
+                    this.speed = 10;
+                    this.velocity = vec3.create();
+                    this.rotation = vec3.create();
+
+                    this.update = function(dt){
+                        var rotationMatrix = mat4.create();
+                        mat4.rotateX(rotationMatrix, rotationMatrix, this.rotation[0]);
+                        mat4.rotateY(rotationMatrix, rotationMatrix,this.rotation[1]);
+
+                        var temp_target = vec3.clone(this.base_target);
+
+                        vec3.subtract(temp_target,temp_target, this.position);
+                        vec3.transformMat4(temp_target,temp_target,rotationMatrix);
+                        
+                        var rotationMatrix = mat4.create();
+
+                        vec3.transformMat4(temp_target,temp_target,rotationMatrix)
+                        vec3.add(temp_target,temp_target,this.position);
+                        this.target = temp_target;
+
+                        var up_normal =vec3.create();
+                        vec3.set(up_normal,0,1,0);
+
+                        vec3.transformMat4(up_normal,up_normal, rotationMatrix);
+                        this.up = up_normal;
+                        var forward = [];
+                        vec3.subtract(forward, this.target, this.position);
+                        vec3.normalize(forward, forward);
+
+
+
+                        var right = [];
+                        vec3.cross(right, this.up, forward);
+                        vec3.normalize(right, right);
+
+                        
+                        switch (this.movement){
+                            case Movement["none"]:
+                                vec3.set(this.velocity,0,0,0);
+                                break;
+                            case Movement["forward"]:
+                                vec3.set(this.velocity, forward[0] * 10,forward[1] * 10, forward[2] * 10);
+                                break;
+                            case Movement["backward"]:
+                                vec3.set(this.velocity, forward[0] * -10,forward[1] * -10, forward[2] * -10);
+                                break;
+                            case Movement["left"]:
+                                vec3.set(this.velocity, right[0] * 10, right[1] * 10, right[2] * 10);
+                                break;
+                            case Movement["right"]:
+                                vec3.set(this.velocity, right[0] * -10, right[1] * -10, right[2] * -10);
+                                break;
+                            default:
+
+                        }
+
+                        
+
+
+                        var vel = [this.velocity[0] * dt, this.velocity[1] * dt, this.velocity[2] * dt];
+                        vec3.add(this.position, this.position, vel);
+                        vec3.add(this.base_target, this.base_target, vel);
+                        vec3.add(this.target, this.target, vel);
+
+
+
+                    }
+                    
+                    this.view_matrix = function(){
+                        var view_matrix = [];
+                        
+                      
+                        mat4.lookAt(view_matrix, this.position, this.target, this.up);  
+                        return view_matrix;   
+
+                    }
+                }
+            }
+//#endregion
+            var canvas = document.getElementById("my_canvas");
+            var gl = canvas.getContext("webgl2")
+            var color_picker = document.getElementById("color_picker");
+
+
+
+
+
+            var vertex_position_buffer = gl.createBuffer();
+            gl.bindBuffer(gl.ARRAY_BUFFER, vertex_position_buffer);
+            gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(Cube.vertex), gl.STATIC_DRAW);
+
+            var index_position_buffer = gl.createBuffer();
+            gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, index_position_buffer);
+            gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, new Uint16Array(Cube.index), gl.STATIC_DRAW);
+
+            var color_buffer = gl.createBuffer();
+            gl.bindBuffer(gl.ARRAY_BUFFER, color_buffer);
+            gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(Cube.colors), gl.STATIC_DRAW);
+
+            var vertex_shader_3d = 
+                'attribute vec3 position;' + 
+                'uniform mat4 Pmatrix;'+
+                'uniform mat4 Vmatrix;'+
+                'uniform mat4 Mmatrix;'+
+                'attribute vec3 color;'+
+                'varying vec3 vColor;'+
+                'void main(void) {' + 
+                    ' gl_Position = Pmatrix*Vmatrix*Mmatrix*vec4(position, 1.0);' +
+                    ' vColor = color;' +
+                 '}' ;
+            var vertShader = gl.createShader(gl.VERTEX_SHADER);
+            gl.shaderSource(vertShader, vertex_shader_3d);
+            gl.compileShader(vertShader);
+
+            var fragCode = 'precision mediump float;'+
+            'varying vec3 vColor;'+
+            'uniform vec3 Color;' +
+            
+            'void main(void) {' + 
+                'gl_FragColor = vec4(Color*vColor, 1.0);' + 
+            '}';
+            var fragShader = gl.createShader(gl.FRAGMENT_SHADER);    
+            gl.shaderSource(fragShader, fragCode);    
+            gl.compileShader(fragShader);
+
+            var shaderProgram = gl.createProgram();
+            gl.attachShader(shaderProgram, vertShader); 
+            gl.attachShader(shaderProgram, fragShader);
+            gl.linkProgram(shaderProgram);
+    
+            var _Color = gl.getUniformLocation(shaderProgram, "Color");
+            var _Pmatrix = gl.getUniformLocation(shaderProgram, "Pmatrix");
+            var _Vmatrix = gl.getUniformLocation(shaderProgram, "Vmatrix");
+            var _Mmatrix = gl.getUniformLocation(shaderProgram, "Mmatrix");
+
+            gl.bindBuffer(gl.ARRAY_BUFFER, vertex_position_buffer);
+            var position = gl.getAttribLocation(shaderProgram, "position");
+            gl.vertexAttribPointer(position, 3, gl.FLOAT, false, 0, 0);
+            gl.enableVertexAttribArray(position);
+
+            gl.bindBuffer(gl.ARRAY_BUFFER, color_buffer);
+            var color = gl.getAttribLocation(shaderProgram, "color");
+            gl.vertexAttribPointer(color, 3, gl.FLOAT, false,0,0) ;
+            gl.enableVertexAttribArray(color);
+            gl.useProgram(shaderProgram);
+
+            
+
+            var projection_matrix = [];
+            mat4.perspective(projection_matrix, Math.PI/2, canvas.width/canvas.height,1,100);
+            var view_matrix = [];
+
+            var translation = vec3.create();
+            vec3.set (translation, 0, 0, -10.0);
+            mat4.fromTranslation(view_matrix,translation);
+
+            var world_objects = [new Cube(vec3.create(), vec3.fromValues(0.5,0.1,0.1))];
+            var camera = new Camera();
+            var selected_block_color = vec3.fromValues(0.5,1.0,0.5);
+
+
+            color_picker.addEventListener("change",(e) =>{
+                
+                var color_value = color_picker.value;
+                var r = parseInt(color_value.substr(1,2), 16) / 255;
+                var g = parseInt(color_value.substr(3,2),16) /255;
+                var b = parseInt(color_value.substr(5,2),16) /255;
+                selected_block_color = vec3.fromValues(r,g,b);
+            })
+
+            document.addEventListener("keypress", (e) =>{
+                if(e.key == "w"){
+                    camera.movement = Movement["forward"];
+                }else if(e.key == "s"){
+                    camera.movement = Movement["backward"];
+                }
+
+                if(e.key == "a"){
+                    camera.movement = Movement["left"];
+                }else if(e.key == "d"){
+                    camera.movement = Movement["right"];
+                }
+            });
+
+
+            document.addEventListener("keyup", (e) =>{
+                if(e.key == "w" || e.key == "s" || e.key == "a" || e.key =="d"){
+                    camera.movement = Movement["none"];
+                }
+            })
+
+            var orbit = false;
+
+            const Mouse_Mode = {"camera_rotate":0,"block_place":1,"block_delete":2, "block_recolor":3, "eye_dropper":4}
+            Object.freeze(Movement);
+            var mouse_mode = Mouse_Mode["camera_rotate"];
+            
+            camera_rotate_mode = function(event){
+                this.mouse_mode = Mouse_Mode["camera_rotate"];
+            }
+
+            block_place_mode = function(event){
+                this.mouse_mode = Mouse_Mode["block_place"];
+            }
+
+            block_delete_mode = function(event){
+                this.mouse_mode = Mouse_Mode["block_delete"]
+            }
+
+            block_recolor_mode = function(event){
+                this.mouse_mode = Mouse_Mode["block_recolor"]
+
+            }
+
+            eye_dropper_mode = function(event){
+                this.mouse_mode = Mouse_Mode["eye_dropper"]
+            }
+     
+            
+            canvas.addEventListener("mousedown", (e) =>{
+                orbit = true;
+                if (mouse_mode != Mouse_Mode["camera_rotate"]){
+                    let rect = canvas.getBoundingClientRect();
+                    let x = 2*(e.clientX - rect.left)/canvas.width - 1;
+                    let y = -(2*(e.clientY - rect.top)/canvas.height - 1);
+                    let z = 1.0;
+                    var target = vec3.fromValues(x,y,z);
+                    var direction = [];
+                    var m = mat4.create();
+                    mat4.multiply(m, projection_matrix, camera.view_matrix());
+                    mat4.invert(m,m);
+                    vec3.transformMat4(target, target, m)
+                    vec3.subtract(direction, target, camera.position);
+                    vec3.normalize(direction, direction)   
+                    n=10
+                    var pos = vec3.fromValues(n,n,n);
+                    vec3.multiply(pos,direction, pos);
+                    vec3.add(pos, pos, camera.position);
+                    
+                    var location = raycast(camera.position, direction, 10);
+
+                    switch(mouse_mode){
+                        case Mouse_Mode["block_place"]:
+                            if(location.point == null){
+                            vec3.floor(pos,pos);
+                            world_objects.push(new Cube(pos, selected_block_color));
+                            }else{
+                                vec3.add(location.point,location.object.position, location.normal)
+                                world_objects.push(new Cube(location.point, selected_block_color));
+                            }
+                            break;
+                        case Mouse_Mode["block_delete"]:
+                            if(location.point != null){
+                                var normal = location.normal;
+                                world_objects = world_objects.filter((v) =>{
+                            
+                                return v!= location.object;
+                                });
+                            }   
+                            break;
+                        case Mouse_Mode["block_recolor"]:
+                            if(location.object !=null){
+                                location.object.color = selected_block_color;
+                                }
+                            break;
+                        case Mouse_Mode["eye_dropper"]:
+                            if(location.object != null){
+                                var color= location.object.color;
+                                var r = (Math.floor(color[0] * 255)).toString(16);
+                                var g = (Math.floor(color[1] * 255)).toString(16);
+                                var b = (Math.floor(color[2] * 255)).toString(16);
+                                color_picker.value = "#" + r + g + b;
+                            }     
+                            break; 
+                        }
+                    }
+                }                
+                    
+            );
+
+            function filter_out_obscured_blocks(){
+                 return world_objects.filter(block =>{
+                    return !(world_objects.filter(b =>{
+                        return vec3.distance(block.position, b.position) == 1.0;
+                    }).length == 6);
+                });
+              
+            }
+
+            function filter_out_visible_blocks(){
+                return world_objects.filter(block =>{
+                    return (world_objects.filter(b =>{
+                        return vec3.distance(block.position, b.position) == 1.0;
+                    }).length == 6);
+                });
+            }
+
+            function filter_obscured_faces(){
+                var visible = filter_out_obscured_blocks();
+                var obsured = filter_out_visible_blocks();
+                var obj_faces=[];
+                if(world_objects.length == 1){
+                    return world_objects[0].get_aabb().faces
+                }else{
+                        visible.forEach(visible_block =>{
+                            var fc = visible_block.get_aabb().faces
+
+                            world_objects.forEach(other_block =>{
+                                if(other_block != visible_block){
+                                    var delta_position = [];
+                                    vec3.subtract(delta_position, visible_block.position, other_block.position);
+                                    //console.log(fc);
+                                    if(delta_position[0] == -1){
+                                        //console.log("is left");
+                                        fc = fc.filter( rect =>{
+                                            return !vec3.equals(rect.normal, vec3.fromValues(1,0,0))
+                                        });
+                                    }else if(delta_position[0] = 1){
+                                        //console.log("is_right");
+                                        fc = fc.filter( rect =>{
+                                            return !vec3.equals(rect.normal, vec3.fromValues(-1,0,0))
+                                        });
+                                    }else if(delta_position[1] = -1){
+                                        //console.log("is_down");
+                                        fc = fc.filter( rect =>{
+                                            return !vec3.equals(rect.normal, vec3.fromValues(0,1,0))
+                                        });
+                                    }else if(delta_position[1] = 1){
+                                        fc = fc.filter( rect =>{
+                                            return !vec3.equals(rect.normal, vec3.fromValues(0,-1,0))
+                                        });
+                                    }else if(delta_position[2] = -1){
+                                        fc = fc.filter( rect =>{
+                                            return !vec3.equals(rect.normal, vec3.fromValues(0,0,1))
+                                        });
+                                    }else if(delta_position[2] = 1){
+                                        fc = fc.filter( rect =>{
+                                            return !vec3.equals(rect.normal, vec3.fromValues(0,0,-1))
+                                        });
+                                    }
+                                    
+                                }
+                                
+                            
+                        });
+                        
+                        fc.forEach(face =>{
+                                    obj_faces.push(face);
+                                });
+                        });
+                }
+                
+                return (obj_faces);
+
+            
+            }
+
+            function convert_faces_to_polygons_then_save(f){
+                
+                var index  = 1;
+                var vertex =[];
+                var faces = [];
+                f.forEach(rect =>{
+                    
+                    console.log(rect.bottom_left() + "," + rect.top_left() + "," + rect.top_right() + "," + rect.bottom_right());
+
+                    vertex.push(rect.bottom_left());
+                    vertex.push(rect.top_left());
+                    vertex.push(rect.top_right());
+                    vertex.push(rect.bottom_right());
+                    
+                    faces.push([index, index + 1, index + 2]);
+                    faces.push([index, index + 2, index + 3]);
+                    index += 4;
+                });
+
+                var file_string = "";
+                vertex.forEach(v =>{
+                    file_string += "v " + v[0] + " " + v[1] + " " + v[2] + "\n";
+
+                });
+                faces.forEach(f =>{
+                    file_string += "f " + f[0] + " " + f[1] + " " + f[2] +"\n";
+                });
+
+                var xml_http_req = new XMLHttpRequest()
+                xml_http_req.open("POST", '/save.obj');
+                xml_http_req.setRequestHeader("Content-Type", "application/json");
+                xml_http_req.responseType = 'blob'
+                var data = JSON.stringify({"file_string": file_string});
+                xml_http_req.onload = function(event){
+                    var a = document.createElement("a");
+                    document.body.appendChild(a);
+                    a.style = "display: none";
+                    a.href = 'obj/download.obj';
+                    a.download = "";
+                    a.click();
+                }
+                xml_http_req.send(data);
+                
+                
+            }
+
+            function save_button_pressed(event){               
+                var faces =  filter_obscured_faces();
+                convert_faces_to_polygons_then_save(faces);
+
+            }
+
+            function raycast(position,direction, max_distance){
+                var closest_point = null;
+                var closest_normal = null;
+                var closest_object= null;
+                world_objects.forEach(obj =>{
+                    d = vec3.distance(position, obj.position)
+                    if(d < max_distance){
+                        var collider = obj.get_aabb();
+                        collider.faces.forEach(rect =>{
+                            var alignment = rect.alighnment;
+                            var n;
+                            var x;
+                            var y;
+                            var z;
+                            var hit = false;
+                            switch(alignment){
+                                case 0://x;
+                                    n = (rect.position[0] -position[0])/direction[0];
+                                    break; 
+                                case 1:// y
+                                    n = (rect.position[1] -position[1])/direction[1];
+                                    break;
+                                case 2: //z
+                                    n = (rect.position[2] -position[2])/direction[2];
+                                    
+                                    break;
+                            }
+
+                            x = position[0] + n*direction[0]; 
+                            y = position[1] + n*direction[1]; 
+                            z = position[2] + n*direction[2]; 
+                            var pos = vec3.fromValues(x,y,z);
+
+                            hit = rect.contains(pos);  
+                                                     
+                            if(hit){
+                                if(closest_point == null){
+                                    closest_point = pos;
+                                    closest_normal = rect.normal;
+                                    closest_object = obj;
+                                }
+                                else if(vec3.distance(pos, position) < vec3.distance(closest_point, position)){
+                                    closest_point = pos
+                                    closest_normal = rect.normal;
+                                    closest_object = obj;
+                                }
+                            }
+                        });
+                    }  
+                });
+
+                return {"point": closest_point, "normal":closest_normal, "object":closest_object};
+            }
+
+            canvas.addEventListener("mouseup", (e) =>{
+                orbit = false;
+            });
+
+            canvas.addEventListener("mousemove", (e) =>{
+                if(orbit){
+                    if(mouse_mode == Mouse_Mode["camera_rotate"]){
+                        camera.rotation[1] += e.movementX / 180 * Math.PI;
+                        camera.rotation[0] += e.movementY / 180 * Math.PI;  
+                    }
+                    
+                }
+            });
+
+            
+            
+
+            old_time = 0;
+            function animate(time){
+                var dt = (time - old_time)/1000;
+                old_time = time;
+
+                camera.update(dt);
+
+                gl.clearColor(0.5, 0.5, 0.5, 0.9);
+                gl.enable(gl.DEPTH_TEST); 
+                gl.clear(gl.COLOR_BUFFER_BIT);
+                gl.viewport(0,0,canvas.width,canvas.height);
+                gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+
+                view_matrix = camera.view_matrix();
+                world_objects.forEach(o =>{
+                    var model_matrix = mat4.create();
+                    mat4.translate(model_matrix,model_matrix,o.position);
+
+
+                    gl.uniform3f(_Color, o.color[0], o.color[1], o.color[2])
+                    gl.uniformMatrix4fv(_Pmatrix, false, projection_matrix);
+                    gl.uniformMatrix4fv(_Vmatrix, false, view_matrix);
+                    gl.uniformMatrix4fv(_Mmatrix, false, model_matrix);
+                    gl.drawElements(gl.TRIANGLES, Cube.index.length, gl.UNSIGNED_SHORT,0);  
+                });
+
+                //gl.drawElements(gl.LINES, 0, 6)
+                
+                window.requestAnimationFrame(animate);
+            }
+            animate(0);
+            
+        </script>
+            
+
+    </body>
+
+</html>
